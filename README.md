@@ -4,6 +4,10 @@ A single-command bulk updater for Windows 11 (PowerShell). Save all your tool
 update commands once, then run them all with `level-up all` — or target
 specific tools by name.
 
+## Demo
+
+https://github.com/user-attachments/assets/904b37c1-ad9b-40fd-a52a-ff326f1e7811
+
 ---
 
 ## Requirements
