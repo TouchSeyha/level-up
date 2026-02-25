@@ -265,39 +265,55 @@ function Invoke-NamedCommands {
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
+function Read-YesNo {
+    param([string]$Prompt)
+
+    while ($true) {
+        $answer = (Read-Host $Prompt).Trim().ToUpperInvariant()
+        if ($answer -eq 'Y' -or $answer -eq 'YES') { return $true }
+        if ($answer -eq 'N' -or $answer -eq 'NO') { return $false }
+        Write-Host "Please enter y or n." -ForegroundColor Yellow
+    }
+}
+
 function Add-Entry {
-    $config = Get-Config
+    while ($true) {
+        $config = Get-Config
 
-    Write-Host ""
-    Write-Host "Add a new update command" -ForegroundColor Cyan
-    Write-Host ""
+        Write-Host ""
+        Write-Host "Add a new update command" -ForegroundColor Cyan
+        Write-Host ""
 
-    $name = (Read-Host "  Name (e.g. codex, claude)").Trim()
-    if ([string]::IsNullOrEmpty($name)) {
-        Write-Host "Name cannot be empty." -ForegroundColor Red
-        return
+        $name = (Read-Host "  Name (e.g. codex, claude)").Trim()
+        if ([string]::IsNullOrEmpty($name)) {
+            Write-Host "Name cannot be empty." -ForegroundColor Red
+            return
+        }
+
+        $existing = @($config.commands) | Where-Object { $_.name -eq $name }
+        if ($null -ne $existing -and @($existing).Count -gt 0) {
+            Write-Host "Entry '$name' already exists. Use 'level-up remove $name' first." -ForegroundColor Red
+            return
+        }
+
+        $command = (Read-Host "  Command (e.g. npm i -g @openai/codex@latest)").Trim()
+        if ([string]::IsNullOrEmpty($command)) {
+            Write-Host "Command cannot be empty." -ForegroundColor Red
+            return
+        }
+
+        $newEntry         = [PSCustomObject]@{ name = $name; command = $command }
+        $config.commands  = @($config.commands) + $newEntry
+        Save-Config $config
+
+        Write-Host ""
+        Write-Host "  Added: $name" -ForegroundColor Green
+        Write-Host "         $command" -ForegroundColor DarkGray
+        Write-Host ""
+
+        $addMore = Read-YesNo -Prompt "Add another? (y/n)"
+        if (-not $addMore) { return }
     }
-
-    $existing = @($config.commands) | Where-Object { $_.name -eq $name }
-    if ($null -ne $existing -and @($existing).Count -gt 0) {
-        Write-Host "Entry '$name' already exists. Use 'level-up remove $name' first." -ForegroundColor Red
-        return
-    }
-
-    $command = (Read-Host "  Command (e.g. npm i -g @openai/codex@latest)").Trim()
-    if ([string]::IsNullOrEmpty($command)) {
-        Write-Host "Command cannot be empty." -ForegroundColor Red
-        return
-    }
-
-    $newEntry         = [PSCustomObject]@{ name = $name; command = $command }
-    $config.commands  = @($config.commands) + $newEntry
-    Save-Config $config
-
-    Write-Host ""
-    Write-Host "  Added: $name" -ForegroundColor Green
-    Write-Host "         $command" -ForegroundColor DarkGray
-    Write-Host ""
 }
 
 function Remove-Entry {
@@ -308,18 +324,32 @@ function Remove-Entry {
         return
     }
 
-    $config = Get-Config
-    $before = @($config.commands).Count
-    $config.commands = @($config.commands | Where-Object { $_.name -ne $Name })
-    $after  = @($config.commands).Count
+    $currentName = $Name
+    while ($true) {
+        $config = Get-Config
+        $before = @($config.commands).Count
+        $config.commands = @($config.commands | Where-Object { $_.name -ne $currentName })
+        $after  = @($config.commands).Count
 
-    if ($before -eq $after) {
-        Write-Host "Not found: '$Name'" -ForegroundColor Red
-        exit 1
+        if ($before -eq $after) {
+            Write-Host "Not found: '$currentName'" -ForegroundColor Red
+            exit 1
+        }
+
+        Save-Config $config
+        Write-Host "Removed: $currentName" -ForegroundColor Green
+
+        $removeMore = Read-YesNo -Prompt "Delete another? (y/n)"
+        if (-not $removeMore) { return }
+
+        $nextName = (Read-Host "Name to delete").Trim()
+        if ([string]::IsNullOrEmpty($nextName)) {
+            Write-Host "Name cannot be empty." -ForegroundColor Red
+            return
+        }
+
+        $currentName = $nextName
     }
-
-    Save-Config $config
-    Write-Host "Removed: $Name" -ForegroundColor Green
 }
 
 function Show-List {
