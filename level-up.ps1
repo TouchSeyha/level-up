@@ -93,6 +93,32 @@ function Close-RunLog {
     Write-LogLine $line
 }
 
+function Is-InterruptExitCode {
+    param([int]$Code)
+    return ($Code -eq 130 -or $Code -eq -1073741510 -or $Code -eq 3221225786)
+}
+
+function Is-CancellationError {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    if ($null -eq $ErrorRecord) { return $false }
+
+    $exception = $ErrorRecord.Exception
+    if ($exception -is [System.Management.Automation.PipelineStoppedException]) { return $true }
+    if ($exception -is [System.OperationCanceledException]) { return $true }
+
+    if ($ErrorRecord.FullyQualifiedErrorId -match 'PipelineStopped|ConsoleCancelEvent|OperationStopped') {
+        return $true
+    }
+
+    $message = ""
+    if ($null -ne $exception -and -not [string]::IsNullOrEmpty($exception.Message)) {
+        $message = $exception.Message
+    }
+
+    return ($message -match 'canceled by the user|cancelled by the user|pipeline has been stopped')
+}
+
 # ---------------------------------------------------------------------------
 # Run engine
 # ---------------------------------------------------------------------------
@@ -118,11 +144,19 @@ function Invoke-SingleCommand {
         # here — no local assignment that would hide the global automatic var.
         Invoke-Expression $Command | Out-Host
         if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-            $exitCode = $LASTEXITCODE
+            if (Is-InterruptExitCode -Code $LASTEXITCODE) {
+                $exitCode = 130
+            } else {
+                $exitCode = $LASTEXITCODE
+            }
         }
     } catch {
-        $exitCode = 1
-        Write-Host "    ERROR: $_" -ForegroundColor Red
+        if (Is-CancellationError -ErrorRecord $_) {
+            $exitCode = 130
+        } else {
+            $exitCode = 1
+            Write-Host "    ERROR: $_" -ForegroundColor Red
+        }
     }
 
     $duration = [int]((Get-Date) - $start).TotalSeconds
@@ -131,6 +165,9 @@ function Invoke-SingleCommand {
     if ($exitCode -eq 0) {
         Write-Host "    [OK] exit $exitCode  ($($duration)s)" -ForegroundColor Green
         Write-LogLine "$ts2 <-- $Name`: EXIT $exitCode ($($duration)s)"
+    } elseif ($exitCode -eq 130) {
+        Write-Host "    [INTERRUPTED] Ctrl+C  ($($duration)s)" -ForegroundColor Yellow
+        Write-LogLine "$ts2 <-- $Name`: INTERRUPTED ($($duration)s)"
     } else {
         Write-Host "    [FAILED] exit $exitCode  ($($duration)s)" -ForegroundColor Red
         Write-LogLine "$ts2 <-- $Name`: EXIT $exitCode ($($duration)s) [FAILED]"
@@ -152,11 +189,17 @@ function Invoke-CommandList {
     $passed      = 0
     $failed      = 0
     $failedNames = @()
+    $interrupted = $false
 
     foreach ($entry in $Entries) {
         $code = Invoke-SingleCommand -Name $entry.name -Command $entry.command
         if ($code -eq 0) {
             $passed++
+        } elseif ($code -eq 130) {
+            $failed++
+            $failedNames += $entry.name
+            $interrupted = $true
+            break
         } else {
             $failed++
             $failedNames += $entry.name
@@ -173,6 +216,11 @@ function Invoke-CommandList {
         Write-Host ("  Failed : {0}  ({1})" -f $failed, ($failedNames -join ', ')) -ForegroundColor Red
         Write-Host "  Log    : $script:CurrentLogFile" -ForegroundColor DarkGray
         Write-Host ""
+        if ($interrupted) {
+            Write-Host "  Stopped: interrupted by user (Ctrl+C)" -ForegroundColor Yellow
+            Write-Host ""
+            exit 130
+        }
         exit 1
     } else {
         Write-Host ("  Failed : {0}" -f $failed) -ForegroundColor Green
@@ -310,7 +358,7 @@ function Open-Editor {
     & $editor $ConfigFile
 }
 
-function Test-Doctor {
+function Invoke-Doctor {
     $config   = Get-Config
     $commands = @($config.commands)
 
@@ -499,7 +547,7 @@ switch ($Action.ToLower()) {
     }
     'list'   { Show-List }
     'edit'   { Open-Editor }
-    'doctor' { Test-Doctor }
+    'doctor' { Invoke-Doctor }
     'log'    { Show-LastLog }
     'alias'  {
         if ($Names -contains '--install') {
