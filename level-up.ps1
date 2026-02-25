@@ -561,6 +561,8 @@ function Show-Help {
     level-up alias --install
     level-up alias --add codex
 
+  Built by Seyha Touch. Source: https://github.com/TouchSeyha
+
 "@ -ForegroundColor White
 }
 
