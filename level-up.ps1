@@ -52,8 +52,18 @@ function Get-Config {
             ConvertTo-Json -Depth 5 |
             Set-Content -Path $ConfigFile -Encoding UTF8
     }
-    $raw = Get-Content -Path $ConfigFile -Raw -Encoding UTF8
-    return $raw | ConvertFrom-Json
+    $raw    = Get-Content -Path $ConfigFile -Raw -Encoding UTF8
+    $config = $raw | ConvertFrom-Json
+
+    # Migrate: ensure every command has the 'enabled' field (backward compat)
+    $config.commands = @($config.commands | ForEach-Object {
+        if ($null -eq $_.PSObject.Properties['enabled']) {
+            $_ | Add-Member -NotePropertyName 'enabled' -NotePropertyValue $true -Force
+        }
+        $_
+    })
+
+    return $config
 }
 
 function Save-Config {
@@ -93,12 +103,12 @@ function Close-RunLog {
     Write-LogLine $line
 }
 
-function Is-InterruptExitCode {
+function InterruptExitCode {
     param([int]$Code)
     return ($Code -eq 130 -or $Code -eq -1073741510 -or $Code -eq 3221225786)
 }
 
-function Is-CancellationError {
+function CancellationError {
     param([System.Management.Automation.ErrorRecord]$ErrorRecord)
 
     if ($null -eq $ErrorRecord) { return $false }
@@ -144,14 +154,14 @@ function Invoke-SingleCommand {
         # here — no local assignment that would hide the global automatic var.
         Invoke-Expression $Command | Out-Host
         if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-            if (Is-InterruptExitCode -Code $LASTEXITCODE) {
+            if (InterruptExitCode -Code $LASTEXITCODE) {
                 $exitCode = 130
             } else {
                 $exitCode = $LASTEXITCODE
             }
         }
     } catch {
-        if (Is-CancellationError -ErrorRecord $_) {
+        if (CancellationError -ErrorRecord $_) {
             $exitCode = 130
         } else {
             $exitCode = 1
@@ -231,7 +241,14 @@ function Invoke-CommandList {
 
 function Invoke-AllCommands {
     $config = Get-Config
-    Invoke-CommandList -Entries @($config.commands) -Label 'all'
+    $active = @($config.commands | Where-Object { $_.enabled -ne $false })
+
+    if ($active.Count -eq 0 -and @($config.commands).Count -gt 0) {
+        Write-Host "All entries are disabled. Use 'level-up enable <name>' to re-enable one." -ForegroundColor Yellow
+        return
+    }
+
+    Invoke-CommandList -Entries $active -Label 'all'
 }
 
 function Invoke-NamedCommands {
@@ -249,6 +266,8 @@ function Invoke-NamedCommands {
         $entry = @($config.commands) | Where-Object { $_.name -eq $n }
         if ($null -eq $entry -or @($entry).Count -eq 0) {
             Write-Host "Not found: '$n'" -ForegroundColor Red
+        } elseif ($entry[0].enabled -eq $false) {
+            Write-Host "  [DISABLED] '$n' is disabled. Use 'level-up enable $n' to re-enable it." -ForegroundColor Yellow
         } else {
             $entries += $entry
         }
@@ -302,7 +321,7 @@ function Add-Entry {
             return
         }
 
-        $newEntry         = [PSCustomObject]@{ name = $name; command = $command }
+        $newEntry         = [PSCustomObject]@{ name = $name; command = $command; enabled = $true }
         $config.commands  = @($config.commands) + $newEntry
         Save-Config $config
 
@@ -352,6 +371,33 @@ function Remove-Entry {
     }
 }
 
+function Set-EntryEnabled {
+    param([string]$Name, [bool]$Enabled)
+
+    if ([string]::IsNullOrEmpty($Name)) {
+        $verb = if ($Enabled) { 'enable' } else { 'disable' }
+        Write-Host "Usage: level-up $verb <name>" -ForegroundColor Yellow
+        return
+    }
+
+    $config = Get-Config
+    $entry  = @($config.commands) | Where-Object { $_.name -eq $Name }
+
+    if ($null -eq $entry -or @($entry).Count -eq 0) {
+        Write-Host "Not found: '$Name'" -ForegroundColor Red
+        exit 1
+    }
+
+    $entry[0].enabled = $Enabled
+    Save-Config $config
+
+    if ($Enabled) {
+        Write-Host "Enabled:  $Name" -ForegroundColor Green
+    } else {
+        Write-Host "Disabled: $Name" -ForegroundColor Red
+    }
+}
+
 function Show-List {
     $config   = Get-Config
     $commands = @($config.commands)
@@ -369,11 +415,19 @@ function Show-List {
     Write-Host ""
     Write-Host ("  Configured entries ({0}):" -f $commands.Count) -ForegroundColor Cyan
     Write-Host ""
-    Write-Host ("  {0,-$maxName}  {1}" -f "NAME", "COMMAND") -ForegroundColor White
-    Write-Host ("  {0,-$maxName}  {1}" -f ("-" * $maxName), ("-" * 40)) -ForegroundColor DarkGray
+    Write-Host ("  {0,-$maxName}  {1,-8}  {2}" -f "NAME", "STATUS", "COMMAND") -ForegroundColor White
+    Write-Host ("  {0,-$maxName}  {1,-8}  {2}" -f ("-" * $maxName), "--------", ("-" * 40)) -ForegroundColor DarkGray
 
     foreach ($entry in $commands) {
-        Write-Host ("  {0,-$maxName}  {1}" -f $entry.name, $entry.command)
+        $isEnabled = $entry.enabled -ne $false
+        $status    = if ($isEnabled) { 'enabled' } else { 'disabled' }
+        $rowColor  = if ($isEnabled) { 'White' } else { 'DarkGray' }
+        $statColor = if ($isEnabled) { 'Green' } else { 'Red' }
+        $nameColor = if ($isEnabled) { 'Yellow' } else { 'DarkGray' }
+
+        Write-Host ("  {0,-$maxName}  " -f $entry.name) -ForegroundColor $nameColor -NoNewline
+        Write-Host ("{0,-8}  " -f $status) -ForegroundColor $statColor -NoNewline
+        Write-Host ("{0}" -f $entry.command) -ForegroundColor $rowColor
     }
     Write-Host ""
 }
@@ -406,6 +460,11 @@ function Invoke-Doctor {
     $maxName = [Math]::Max($maxName, 4)
 
     foreach ($entry in $commands) {
+        $isEnabled = $entry.enabled -ne $false
+        if (-not $isEnabled) {
+            Write-Host ("  [DISABLED] {0,-$maxName}  (skipped)" -f $entry.name) -ForegroundColor DarkGray
+            continue
+        }
         $exe   = ($entry.command -split '\s+')[0]
         $found = Get-Command $exe -ErrorAction SilentlyContinue
         if ($found) {
@@ -537,8 +596,10 @@ function Show-Help {
     list                      Show all configured entries
     add                       Interactively add a new entry
     remove <name>             Remove an entry by name
+    enable <name>             Enable a disabled entry
+    disable <name>            Disable an entry without removing it
     run <name> [name...]      Run one or more entries by name
-    all                       Run every configured entry
+    all                       Run every enabled entry
     edit                      Open config file in editor
     doctor                    Check all tools exist in PATH
     alias --install           Add 'level-up' function to PowerShell profile
@@ -556,6 +617,8 @@ function Show-Help {
     level-up run codex
     level-up run codex claude opencode
     level-up all
+    level-up disable codex
+    level-up enable codex
     level-up remove codex
     level-up doctor
     level-up alias --install
@@ -576,6 +639,14 @@ switch ($Action.ToLower()) {
     'remove' {
         $target = if ($Names.Count -gt 0) { $Names[0] } else { "" }
         Remove-Entry -Name $target
+    }
+    'enable'  {
+        $target = if ($Names.Count -gt 0) { $Names[0] } else { "" }
+        Set-EntryEnabled -Name $target -Enabled $true
+    }
+    'disable' {
+        $target = if ($Names.Count -gt 0) { $Names[0] } else { "" }
+        Set-EntryEnabled -Name $target -Enabled $false
     }
     'list'   { Show-List }
     'edit'   { Open-Editor }
