@@ -1,8 +1,9 @@
 # level-up
 
-A single-command bulk updater for Windows 11 (PowerShell). Save all your tool
-update commands once, then run them all with `level-up all` — or target
-specific tools by name.
+A single-command bulk updater for Windows 11. `level-up` runs through a
+PowerShell engine and can be launched from PowerShell, Git Bash, or CMD.
+Save all your tool update commands once, then run them all with `level-up all`
+or target specific tools by name.
 
 ## Demo
 
@@ -13,19 +14,22 @@ https://github.com/user-attachments/assets/904b37c1-ad9b-40fd-a52a-ff326f1e7811
 ## Requirements
 
 - Windows 11
-- PowerShell 5.1 or PowerShell 7+ (`pwsh`)
+- PowerShell 5.1 (`powershell.exe`) or PowerShell 7+ (`pwsh`)
+- Git Bash (optional, if you want to launch from Bash)
 - The tools you want to update already installed and available in `PATH`
 
 ---
 
 ## Installation
 
-### 1. Place the script
+### 1. Place the project folder
 
-The script lives at:
+The files should live at:
 
 ```
 C:\Tools\level-up\level-up.ps1
+C:\Tools\level-up\level-up.cmd
+C:\Tools\level-up\level-up
 ```
 
 If you cloned or downloaded this repo elsewhere, move or copy the folder to
@@ -39,7 +43,20 @@ Open PowerShell as Administrator and run once:
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-### 3. Add `level-up` to your PowerShell profile
+### 3. Add `C:\Tools\level-up\` to `PATH`
+
+This enables:
+- `level-up.cmd` in CMD / Windows shell resolution
+- `level-up` in Git Bash
+- direct invocation in PowerShell (without profile aliases)
+
+If you use Git Bash, make the launcher executable once:
+
+```bash
+chmod +x /c/Tools/level-up/level-up
+```
+
+### 4. (Optional) Add `level-up` to your PowerShell profile
 
 Run this command in any PowerShell terminal:
 
@@ -48,7 +65,7 @@ Run this command in any PowerShell terminal:
 ```
 
 This appends a `level-up` function to your `$PROFILE` file so you can call
-`level-up` from any terminal without typing the full path.
+`level-up` without depending on `PATH`.
 
 Reload your profile (or open a new terminal):
 
@@ -57,6 +74,21 @@ Reload your profile (or open a new terminal):
 ```
 
 You are now ready.
+
+### 5. (Optional) Add `level-up` to your Git Bash profile
+
+Run from PowerShell once:
+
+```powershell
+& "C:\Tools\level-up\level-up.ps1" alias --install-bash
+```
+
+Then in Git Bash:
+
+```bash
+source ~/.bashrc
+level-up help
+```
 
 ---
 
@@ -78,6 +110,17 @@ level-up all
 
 ---
 
+## Shell support
+
+| Shell | Launcher | Notes |
+|---|---|---|
+| PowerShell 5.1 | `level-up` (profile) or `level-up.cmd` | `alias --install` adds a profile function |
+| PowerShell 7+ (`pwsh`) | `level-up` (profile) or `level-up.cmd` | `level-up.cmd` prefers `pwsh` automatically |
+| Git Bash | `level-up` | Bash wrapper calls `pwsh` first, then `powershell.exe` |
+| CMD (`cmd.exe`) | `level-up.cmd` | Forwards all args to `level-up.ps1` |
+
+---
+
 ## Command reference
 
 | Command | Description |
@@ -85,11 +128,14 @@ level-up all
 | `level-up list` | Print all configured entries |
 | `level-up add` | Interactively add a new entry |
 | `level-up remove <name>` | Delete an entry by name |
+| `level-up enable <name>` | Enable a disabled entry |
+| `level-up disable <name>` | Disable an entry |
 | `level-up run <name> [name...]` | Run one or more entries by name |
 | `level-up all` | Run every configured entry |
 | `level-up edit` | Open the config file in `$EDITOR` / Notepad |
 | `level-up doctor` | Check that each tool's executable exists in PATH |
 | `level-up alias --install` | Write `level-up` function to `$PROFILE` |
+| `level-up alias --install-bash` | Write `level-up` function to `~/.bashrc` for Git Bash |
 | `level-up alias --add <name>` | Write `level-up-<name>` shortcut to `$PROFILE` |
 | `level-up log` | Print the most recent run log |
 | `level-up help` | Show help text |
@@ -163,7 +209,7 @@ with code `1` if any command failed, so CI scripts can detect failures.
 
 ---
 
-## Per-tool shortcuts (optional)
+## Per-tool shortcuts (optional, PowerShell profile)
 
 Add a dedicated shortcut function for any saved entry:
 
@@ -266,9 +312,16 @@ Log format:
 
 ## Execution model
 
-Commands are run via `Invoke-Expression` in the **current shell session**.
-This means they inherit your `PATH`, environment variables, and any tools
-installed via `nvm`, `volta`, `scoop`, etc.
+`level-up` always executes saved commands through PowerShell (`Invoke-Expression`):
+- In PowerShell, execution happens in the same PowerShell process.
+- In Git Bash / CMD, wrapper launchers invoke PowerShell and forward your args.
+
+For Git Bash compatibility, the launcher:
+- converts the script path with `cygpath -w`
+- uses `MSYS_NO_PATHCONV=1` when calling `powershell.exe`
+
+Your commands still inherit environment from the launched PowerShell process,
+including `PATH` and other environment variables available to that shell.
 
 If a command contains embedded quotes, escape them at `add` time:
 
@@ -320,5 +373,17 @@ echo "Exit: $LASTEXITCODE"   # should be 1
 # 9. Profile function works in a new terminal
 level-up alias --install
 # open new terminal, then:
+level-up list
+
+# 10. Git Bash profile install works
+level-up alias --install-bash
+# open Git Bash, then:
+source ~/.bashrc
+level-up help
+
+# 11. CMD launcher works
+cmd /c level-up list
+
+# 12. Git Bash launcher works (inside Git Bash)
 level-up list
 ```

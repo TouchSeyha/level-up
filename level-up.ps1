@@ -508,8 +508,26 @@ function Get-ProfileText {
     return ""
 }
 
+function Convert-ToGitBashPath {
+    param([string]$WindowsPath)
+
+    if ([string]::IsNullOrWhiteSpace($WindowsPath)) { return "" }
+
+    $normalized = $WindowsPath -replace '\\', '/'
+    if ($normalized -match '^[A-Za-z]:') {
+        $drive = $normalized.Substring(0, 1).ToLowerInvariant()
+        $rest  = $normalized.Substring(2)
+        if (-not $rest.StartsWith('/')) {
+            $rest = "/$rest"
+        }
+        return "/$drive$rest"
+    }
+
+    return $normalized
+}
+
 function Install-ProfileAlias {
-    param([switch]$Install, [string]$AddName)
+    param([switch]$Install, [string]$AddName, [switch]$InstallBash)
 
     # Ensure profile directory exists
     $profileDir = Split-Path $PROFILE
@@ -546,6 +564,45 @@ function level-up { & "$scriptPath" @args }
         return
     }
 
+    # --install-bash : add level-up function to Git Bash profile
+    if ($InstallBash) {
+        $bashRc = Join-Path $env:USERPROFILE '.bashrc'
+        if (-not (Test-Path $bashRc)) {
+            New-Item -ItemType File -Path $bashRc -Force | Out-Null
+        }
+
+        $marker  = '# >>> level-up-bash'
+        $current = Get-Content -Path $bashRc -Raw -Encoding UTF8
+        if ($current -match [regex]::Escape($marker)) {
+            Write-Host "level-up bash function already installed in:" -ForegroundColor Yellow
+            Write-Host "  $bashRc"
+            Write-Host "Remove the '# >>> level-up-bash ... # <<< level-up-bash' block to reinstall."
+            return
+        }
+
+        $scriptPath = $PSCommandPath
+        $scriptDir  = Split-Path -Path $scriptPath -Parent
+        $bashDir    = Convert-ToGitBashPath -WindowsPath $scriptDir
+        $bashScript = "$bashDir/level-up"
+
+        $block = @"
+
+
+# >>> level-up-bash
+level-up() {
+  bash "$bashScript" "`$@"
+}
+# <<< level-up-bash
+"@
+        Add-Content -Path $bashRc -Value $block -Encoding UTF8
+        Write-Host "Installed 'level-up' in Git Bash profile:" -ForegroundColor Green
+        Write-Host "  $bashRc"
+        Write-Host ""
+        Write-Host "Reload your Bash profile to activate:" -ForegroundColor DarkGray
+        Write-Host "  source ~/.bashrc" -ForegroundColor DarkGray
+        return
+    }
+
     # --add <name> : add a per-tool shortcut function
     if (-not [string]::IsNullOrEmpty($AddName)) {
         $config = Get-Config
@@ -578,6 +635,7 @@ function level-up { & "$scriptPath" @args }
 
     Write-Host "Usage:" -ForegroundColor Yellow
     Write-Host "  level-up alias --install         Add 'level-up' function to profile"
+    Write-Host "  level-up alias --install-bash    Add 'level-up' function to ~/.bashrc"
     Write-Host "  level-up alias --add <name>      Add 'level-up-<name>' shortcut to profile"
 }
 
@@ -603,6 +661,7 @@ function Show-Help {
     edit                      Open config file in editor
     doctor                    Check all tools exist in PATH
     alias --install           Add 'level-up' function to PowerShell profile
+    alias --install-bash      Add 'level-up' function to ~/.bashrc for Git Bash
     alias --add <name>        Add 'level-up-<name>' shortcut to profile
     log                       Show the most recent run log
     help                      Show this help
@@ -622,6 +681,7 @@ function Show-Help {
     level-up remove codex
     level-up doctor
     level-up alias --install
+    level-up alias --install-bash
     level-up alias --add codex
 
   Built by Seyha Touch. Source: https://github.com/TouchSeyha
@@ -655,6 +715,8 @@ switch ($Action.ToLower()) {
     'alias'  {
         if ($Names -contains '--install') {
             Install-ProfileAlias -Install
+        } elseif ($Names -contains '--install-bash') {
+            Install-ProfileAlias -InstallBash
         } elseif ($Names -contains '--add') {
             $idx = [array]::IndexOf([string[]]$Names, '--add')
             if ($idx -ge 0 -and ($idx + 1) -lt $Names.Count) {

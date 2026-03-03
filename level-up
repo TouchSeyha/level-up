@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PS_SCRIPT_UNIX="$SCRIPT_DIR/level-up.ps1"
+
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "$PS_SCRIPT_UNIX" "$@"
+    exit $?
+fi
+
+if command -v powershell.exe >/dev/null 2>&1; then
+    if command -v cygpath >/dev/null 2>&1; then
+        PS_SCRIPT_WIN="$(cygpath -w "$PS_SCRIPT_UNIX")"
+    else
+        echo "level-up: cygpath is required when invoking powershell.exe from Bash." >&2
+        exit 127
+    fi
+
+    MSYS_NO_PATHCONV=1 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PS_SCRIPT_WIN" "$@"
+    exit $?
+fi
+
+echo "level-up: neither pwsh nor powershell.exe was found in PATH." >&2
+exit 127
