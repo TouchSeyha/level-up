@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.3] - 2026-03-03
+
+### Added
+- Cross-shell launchers:
+  - `level-up.cmd` for CMD / Windows shell command resolution
+  - `level-up` Bash launcher for Git Bash
+- `level-up alias --install-bash` to register `level-up` in `~/.bashrc`
+- Wrapper fallback behavior:
+  - Prefer `pwsh` when available
+  - Fallback to `powershell.exe`
+
+### Changed
+- Documentation updated for PowerShell, Git Bash, and CMD usage
+- Execution model docs now clarify wrapper behavior and path conversion handling
+
 ## [0.0.2] - 2026-02-26
 
 ### Added
