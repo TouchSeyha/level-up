@@ -10,10 +10,12 @@
 .EXAMPLE
     level-up add
     level-up list
-    level-up run codex
     level-up all
+    level-up run <name>
     level-up doctor
     level-up alias --install
+    level-up enable <name>
+    level-up disable <name>
 
 .NOTES
     Compatible with PowerShell 5.1 and PowerShell 7+.
