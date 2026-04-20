@@ -38,9 +38,17 @@ if ($null -eq $Names) { $Names = @() }
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-$ConfigDir  = "$env:LOCALAPPDATA\level-up"
-$ConfigFile = "$ConfigDir\commands.json"
-$LogDir     = "$ConfigDir\logs"
+if ([string]::IsNullOrEmpty($env:LOCALAPPDATA)) {
+    $ConfigDir = if ([string]::IsNullOrEmpty($env:XDG_CONFIG_HOME)) {
+        "$env:HOME/.config/level-up"
+    } else {
+        "$env:XDG_CONFIG_HOME/level-up"
+    }
+} else {
+    $ConfigDir  = "$env:LOCALAPPDATA\level-up"
+}
+$ConfigFile = Join-Path $ConfigDir 'commands.json'
+$LogDir     = Join-Path $ConfigDir 'logs'
 
 # ---------------------------------------------------------------------------
 # Config helpers
